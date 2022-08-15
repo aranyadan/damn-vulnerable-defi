@@ -1,4 +1,8 @@
-![](cover.png)
+# Solutions for Damn Vulnerable Defi
+
+Contains solution attacker contracts and scripts for all challenges of damn-vulnerable-defi.
+
+![cover](cover.png)
 
 **A set of challenges to learn offensive security of smart contracts in Ethereum.**
 
